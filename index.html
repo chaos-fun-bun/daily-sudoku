@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Daily Sudoku — Discord Edition</title>
+  <style>
+    :root {
+      --bg: #0f172a;         /* slate-900 */
+      --card: #111827;       /* gray-900 */
+      --text: #e5e7eb;       /* gray-200 */
+      --muted: #9ca3af;      /* gray-400 */
+      --accent: #60a5fa;     /* blue-400 */
+      --good: #22c55e;       /* green-500 */
+      --warn: #f59e0b;       /* amber-500 */
+      --bad: #ef4444;        /* red-500 */
+      --grid: #1f2937;       /* gray-800 */
+    }
+    body {
+      margin: 0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      background: var(--bg); color: var(--text);
+      display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 24px;
+    }
+    .wrap { max-width: 980px; width: 100%; }
+    header { margin-bottom: 16px; }
+    h1 { margin: 0 0 6px; font-size: 28px; }
+    .sub { color: var(--muted); font-size: 14px; }
+    .card {
+      background: var(--card); border-radius: 16px; padding: 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    }
+    .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+    select, button, input[type="text"] {
+      background: #0b1220; color: var(--text); border: 1px solid #223; border-radius: 10px; padding: 8px 10px;
+      font-size: 14px;
+    }
+    button { cursor: pointer; }
+    .grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 0; border: 2px solid var(--grid); }
+    .cell {
+      border: 1px solid var(--grid);
+      width: 42px; height: 42px; display:flex; align-items:center; justify-content:center;
+      font-size: 18px;
+      position: relative;
+    }
+    .cell input {
+      width: 100%; height: 100%; text-align: center; font-size: 18px; background: transparent; color: var(--text); border: none; outline: none;
+    }
+    .fixed { background: #121a2f; font-weight: 600; }
+    .b-right { border-right: 2px solid var(--grid); }
+    .b-bottom { border-bottom: 2px solid var(--grid); }
+    .stats { display:flex; gap: 16px; margin-top: 12px; color: var(--muted); }
+    .good { color: var(--good); }
+    .bad { color: var(--bad); }
+    .warn { color: var(--warn); }
+    .share {
+      margin-top: 16px; background: #0b1220; padding: 12px; border: 1px dashed #223; border-radius: 12px; display:none;
+    }
+    .foot { margin-top: 12px; color: var(--muted); font-size: 13px; }
+    .webhook { margin-top: 8px; display: none; }
+    .webhook input { width: 100%; }
+    @media (max-width: 560px) {
+      .cell { width: 34px; height: 34px; font-size: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Daily Sudoku — <span id="dateLabel"></span> (<span id="levelLabel"></span>)</h1>
+      <div class="sub">Same puzzle for everyone. Solve online and share your result in Discord.</div>
+    </header>
+
+    <div class="card">
+      <div class="controls">
+        <label>Difficulty:
+          <select id="level">
+            <option>Easy</option>
+            <option selected>Medium</option>
+            <option>Hard</option>
+            <option>Expert</option>
+          </select>
+        </label>
+        <button id="regen">Load Puzzle</button>
+        <div style="flex:1 1 auto"></div>
+        <div>⏱ <span id="timer">00:00</span></div>
+        <div>❌ Mistakes: <span id="mistakes">0</span></div>
+      </div>
+
+      <div id="grid" class="grid" aria-label="Sudoku grid"></div>
+
+      <div class="stats" id="statusRow">
+        <div id="status">Fill the grid. Timer starts on first edit.</div>
+      </div>
+
+      <div class="share" id="shareBox">
+        <div id="shareText" style="white-space: pre-line; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;"></div>
+        <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+          <button id="copyBtn">Copy result</button>
+          <label style="display:flex; gap:6px; align-items:center;">
+            <input type="checkbox" id="whToggle"/> Auto-post via Discord Webhook
+          </label>
+        </div>
+        <div class="webhook" id="whBox">
+          <input type="text" id="whUrl" placeholder="Paste your Discord Channel Webhook URL here"/>
+          <button id="sendBtn">Send now</button>
+        </div>
+      </div>
+
+      <div class="foot">Tip: share results in your #daily-sudoku channel. The Discord bot can parse: <code>Daily Sudoku YYYY-MM-DD (Level) + Solved in mm:ss | Mistakes: n</code>.</div>
+    </div>
+  </div>
+
+<script>
+/**
+ * Deterministic RNG (seeded by date + difficulty), Sudoku generator/solver,
+ * simple UI, timer, mistake counter, result share block, optional webhook post.
+ * All in one file so you can host it anywhere.
+ */
+
+// ---------- Utilities ----------
+function getParam(name) {
+  const url = new URL(window.location.href);
+  return url.searchParams.get(name);
+}
+function pad(n){ return (n < 10 ? '0' : '') + n; }
+function ymd(date) {
+  const y = date.getFullYear();
+  const m = pad(date.getMonth()+1);
+  const d = pad(date.getDate());
+  return `${y}-${m}-${d}`;
+}
+
+// Seeded PRNG (xmur3 + sfc32)
+function xmur3(str) {
+  for (var i = 0, h = 1779033703 ^ str.length; i < str.length; i++)
+    h = Math.imul(h ^ str.charCodeAt(i), 3432918353), h = h << 13 | h >>> 19;
+  return function() {
+    h = Math.imul(h ^ (h >>> 16), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    return (h ^= h >>> 16) >>> 0;
+  }
+}
+function sfc32(a, b, c, d) {
+  return function() {
+    a >>>= 0; b >>>= 0; c >>>= 0; d >>>= 0; 
+    var t = (a + b) | 0;
+    a = b ^ b >>> 9;
+    b = c + (c << 3) | 0;
+    c = (c << 21 | c >>> 11);
+    d = d + 1 | 0;
+    t = t + d | 0;
+    c = c + t | 0;
+    return (t >>> 0) / 4294967296;
+  }
+}
+function makeRng(seedStr) {
+  const seed = xmur3(seedStr);
+  return sfc32(seed(), seed(), seed(), seed());
+}
+function choice(arr, rnd) {
+  return arr[Math.floor(rnd() * arr.length)];
+}
+function shuffle(arr, rnd) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// ---------- Sudoku core ----------
+function cloneGrid(g){ return g.map(row => row.slice()); }
+
+function findEmpty(grid) {
+  for (let r=0; r<9; r++) for (let c=0; c<9; c++) if (grid[r][c] === 0) return [r,c];
+  return null;
+}
+function valid(grid, r, c, v) {
+  for (let i=0; i<9; i++) {
+    if (grid[r][i] === v || grid[i][c] === v) return false;
+  }
+  const br = Math.floor(r/3)*3, bc = Math.floor(c/3)*3;
+  for (let rr=br; rr<br+3; rr++) for (let cc=bc; cc<bc+3; cc++)
+    if (grid[rr][cc] === v) return false;
+  return true;
+}
+
+// Backtracking solver (returns one solution; for uniqueness, count up to 2)
+function solve(grid, countMode=false, limit=2) {
+  const g = cloneGrid(grid);
+  let solutions = 0;
+  function backtrack() {
+    const pos = findEmpty(g);
+    if (!pos) { solutions++; return true; }
+    const [r,c] = pos;
+    for (let v=1; v<=9; v++) {
+      if (valid(g, r, c, v)) {
+        g[r][c] = v;
+        if (backtrack()) {
+          if (!countMode) return true;
+          if (solutions >= limit) return true;
+        }
+        g[r][c] = 0;
+      }
+    }
+    return false;
+  }
+  const ok = backtrack();
+  return { ok, solutions, grid: g };
+}
+
+// Generate a full valid solved grid with backtracking + RNG order
+function generateSolved(rnd) {
+  const g = Array.from({length:9}, () => Array(9).fill(0));
+  const digits = [1,2,3,4,5,6,7,8,9];
+
+  function fillCell(idx=0) {
+    if (idx >= 81) return true;
+    const r = Math.floor(idx / 9);
+    const c = idx % 9;
+    const order = shuffle(digits, rnd);
+    for (const v of order) {
+      if (valid(g, r, c, v)) {
+        g[r][c] = v;
+        if (fillCell(idx+1)) return true;
+        g[r][c] = 0;
+      }
+    }
+    return false;
+  }
+  fillCell(0);
+  return g;
+}
+
+// Create a puzzle by removing cells while maintaining (likely) unique solution
+function makePuzzleFromSolved(solved, rnd, holes) {
+  const puzzle = cloneGrid(solved);
+  // create list of all positions and shuffle
+  const positions = shuffle([
+    ...Array.from({length:81}, (_,i)=>[Math.floor(i/9), i%9])
+  ], rnd);
+
+  let removed = 0;
+  for (const [r,c] of positions) {
+    if (removed >= holes) break;
+    const backup = puzzle[r][c];
+    puzzle[r][c] = 0;
+
+    // check uniqueness quick
+    const res = solve(puzzle, true, 2);
+    if (res.solutions !== 1) {
+      // not unique, revert
+      puzzle[r][c] = backup;
+      continue;
+    }
+    removed++;
+  }
+  return puzzle;
+}
+
+function holesFor(level) {
+  switch ((level||"Medium").toLowerCase()) {
+    case "easy": return 40;    // fewer holes, easier
+    case "medium": return 50;
+    case "hard": return 58;
+    case "expert": return 62;  // more holes, tougher
+    default: return 50;
+  }
+}
+
+// ---------- UI ----------
+const gridEl = document.getElementById('grid');
+const timerEl = document.getElementById('timer');
+const mistakesEl = document.getElementById('mistakes');
+const statusEl = document.getElementById('status');
+const levelEl = document.getElementById('level');
+const regenBtn = document.getElementById('regen');
+const shareBox = document.getElementById('shareBox');
+const shareText = document.getElementById('shareText');
+const copyBtn = document.getElementById('copyBtn');
+const whToggle = document.getElementById('whToggle');
+const whBox = document.getElementById('whBox');
+const whUrl = document.getElementById('whUrl');
+const sendBtn = document.getElementById('sendBtn');
+const dateLabel = document.getElementById('dateLabel');
+const levelLabel = document.getElementById('levelLabel');
+
+let startTime = null, timerInt = null, mistakes = 0;
+let solution = null, puzzle = null;
+let currentDateStr = null, currentLevel = "Medium";
+let rng = null;
+
+function resetTimer() {
+  if (timerInt) clearInterval(timerInt);
+  startTime = null;
+  timerEl.textContent = "00:00";
+}
+
+function startTimerIfNeeded() {
+  if (startTime) return;
+  startTime = new Date();
+  timerInt = setInterval(()=>{
+    const secs = Math.floor((Date.now() - startTime.getTime())/1000);
+    const mm = Math.floor(secs/60), ss = secs % 60;
+    timerEl.textContent = `${pad(mm)}:${pad(ss)}`;
+  }, 250);
+}
+
+function readDateLevelFromURL() {
+  const dParam = getParam('d');
+  const levParam = getParam('level');
+  let d = null;
+
+  if (dParam) { d = new Date(dParam + "T00:00:00"); }
+  else { d = new Date(); }
+
+  const ds = ymd(d);
+  currentDateStr = ds;
+  dateLabel.textContent = ds;
+
+  if (levParam) levelEl.value = levParam;
+  currentLevel = levelEl.value;
+  levelLabel.textContent = currentLevel;
+}
+
+function buildSeed() {
+  return `${currentDateStr}-${currentLevel}`;
+}
+
+function renderGrid(puz, solved) {
+  gridEl.innerHTML = "";
+  for (let r=0; r<9; r++) {
+    for (let c=0; c<9; c++) {
+      const cell = document.createElement('div');
+      cell.className = "cell";
+      if (c===2 || c===5) cell.classList.add('b-right');
+      if (r===2 || r===5) cell.classList.add('b-bottom');
+
+      const input = document.createElement('input');
+      input.setAttribute('inputmode', 'numeric');
+      input.setAttribute('maxlength', '1');
+      input.setAttribute('aria-label', `Row ${r+1} column ${c+1}`);
+      const val = puz[r][c];
+      if (val !== 0) {
+        input.value = val;
+        input.disabled = true;
+        cell.classList.add('fixed');
+      } else {
+        input.value = "";
+        input.addEventListener('input', (e)=>{
+          const v = e.target.value.replace(/[^1-9]/g, '');
+          e.target.value = v.slice(0,1);
+          if (v) startTimerIfNeeded();
+          if (v) {
+            const num = parseInt(v,10);
+            // Check immediate validity
+            if (num !== solved[r][c]) {
+              mistakes++;
+              mistakesEl.textContent = mistakes;
+              e.target.classList.add('bad');
+              setTimeout(()=>e.target.classList.remove('bad'), 250);
+            }
+          }
+          checkComplete();
+        });
+      }
+      cell.appendChild(input);
+      gridEl.appendChild(cell);
+    }
+  }
+}
+
+function checkComplete() {
+  // If any empty cell remains, return
+  const inputs = gridEl.querySelectorAll('input');
+  for (const el of inputs) {
+    if (!el.disabled && el.value === "") return false;
+  }
+  // All filled: verify correctness
+  const ok = verifyAgainstSolution();
+  if (ok) onSolved();
+  else {
+    statusEl.textContent = "Something is off — check your grid.";
+  }
+}
+
+function verifyAgainstSolution() {
+  // Rebuild user grid
+  const g = Array.from({length:9}, ()=>Array(9).fill(0));
+  const inputs = gridEl.querySelectorAll('input');
+  let idx = 0;
+  for (let r=0; r<9; r++) {
+    for (let c=0; c<9; c++) {
+      const el = inputs[idx++];
+      if (el.disabled) g[r][c] = parseInt(el.value,10);
+      else g[r][c] = el.value ? parseInt(el.value,10) : 0;
+    }
+  }
+  // Compare to solution
+  for (let r=0; r<9; r++) for (let c=0; c<9; c++) {
+    if (g[r][c] !== solution[r][c]) return false;
+  }
+  return true;
+}
+
+function onSolved() {
+  if (timerInt) clearInterval(timerInt);
+  const elapsed = Math.floor((Date.now() - startTime.getTime())/1000);
+  const mm = Math.floor(elapsed/60), ss = elapsed % 60;
+  statusEl.innerHTML = `<span class="good">✅ Solved!</span> Time: ${pad(mm)}:${pad(ss)}  •  Mistakes: ${mistakes}`;
+  const url = new URL(window.location.href);
+  const out = `Daily Sudoku ${currentDateStr} (${currentLevel})
+✅ Solved in ${pad(mm)}:${pad(ss)} | Mistakes: ${mistakes}`;
+  shareText.textContent = out;
+  shareBox.style.display = 'block';
+
+  if (whToggle.checked && whUrl.value.trim()) {
+    sendToWebhook(out);
+  }
+}
+
+function generate() {
+  mistakes = 0;
+  mistakesEl.textContent = "0";
+  resetTimer();
+  shareBox.style.display = 'none';
+  const seed = buildSeed();
+  rng = makeRng(seed);
+
+  // Generate solved grid, then remove holes by difficulty
+  const solvedGrid = generateSolved(rng);
+  const holes = holesFor(currentLevel);
+  const puzzleGrid = makePuzzleFromSolved(solvedGrid, rng, holes);
+
+  solution = solvedGrid;
+  puzzle = puzzleGrid;
+  renderGrid(puzzle, solution);
+  statusEl.textContent = "Puzzle loaded. Good luck!";
+}
+
+function copyShare() {
+  navigator.clipboard.writeText(shareText.textContent).then(()=>{
+    copyBtn.textContent = "Copied!";
+    setTimeout(()=>copyBtn.textContent = "Copy result", 1200);
+  });
+}
+
+function sendToWebhook(text) {
+  const url = whUrl.value.trim();
+  if (!url) return;
+  fetch(url, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ content: text })
+  }).then(r=>{
+    if (r.ok) sendBtn.textContent = "Sent!";
+    else sendBtn.textContent = "Error";
+    setTimeout(()=>sendBtn.textContent = "Send now", 1500);
+  }).catch(()=>{
+    sendBtn.textContent = "Error";
+    setTimeout(()=>sendBtn.textContent = "Send now", 1500);
+  });
+}
+
+// ---------- Init ----------
+readDateLevelFromURL();
+generate();
+
+levelEl.addEventListener('change', ()=>{
+  currentLevel = levelEl.value;
+  levelLabel.textContent = currentLevel;
+});
+regenBtn.addEventListener('click', ()=> generate());
+copyBtn.addEventListener('click', copyShare);
+whToggle.addEventListener('change', ()=>{
+  whBox.style.display = whToggle.checked ? 'block' : 'none';
+});
+sendBtn.addEventListener('click', ()=> sendToWebhook(shareText.textContent));
+
+</script>
+</body>
+</html>
