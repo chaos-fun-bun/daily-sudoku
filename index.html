@@ -5,12 +5,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Daily Sudoku</title>
 <style>
-  :root{
-    --bg:#0f172a;--card:#111827;--text:#e5e7eb;--muted:#94a3b8;
+  :root{--bg:#0f172a;--card:#111827;--text:#e5e7eb;--muted:#94a3b8;
     --line:#1f2937;--thick:#374151;--accent:#60a5fa;--good:#22c55e;--bad:#ef4444;
-    --cell: clamp(30px, 9.5vw, 48px);
-    --fs: calc(var(--cell) * 0.48);
-  }
+    --cell:clamp(30px,9.5vw,48px);--fs:calc(var(--cell)*0.48);}
   body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
   .wrap{max-width:900px;margin:40px auto;padding:0 16px}
   h1{margin:.2rem 0 0;font-weight:700}
@@ -30,9 +27,9 @@
   @keyframes bad{0%{background:#2b0b0b}100%{background:transparent}}
   .share{display:none;margin-top:12px;border:1px dashed #223;border-radius:12px;padding:10px;background:#0b1220}
   .foot{margin-top:10px;color:var(--muted);font-size:14px}
-  .paused-note{ color: var(--muted); margin-left:6px; font-style:italic; }
-  .cell.wrong input { color: var(--bad); font-weight:700; }
-  .cell.right input { color: var(--good); }
+  .paused-note{color:var(--muted);margin-left:6px;font-style:italic}
+  .cell.wrong input{color:var(--bad);font-weight:700}
+  .cell.right input{color:var(--good)}
 </style>
 </head>
 <body>
@@ -43,9 +40,7 @@
   <div class="card">
     <div class="controls">
       <label>Difficulty:
-        <select id="level">
-          <option>Easy</option><option selected>Medium</option><option>Hard</option><option>Expert</option>
-        </select>
+        <select id="level"><option>Easy</option><option selected>Medium</option><option>Hard</option><option>Expert</option></select>
       </label>
       <button id="loadBtn">Load Puzzle</button>
       <button id="pauseBtn">Pause</button>
@@ -57,14 +52,12 @@
     </div>
 
     <div id="grid" aria-label="Sudoku grid"></div>
-
     <div id="status" class="foot">Timer starts on your first entry.</div>
 
     <div id="shareBox" class="share">
       <pre id="shareText" style="white-space:pre-wrap;margin:0"></pre>
       <button id="copyBtn" style="margin-top:8px">Copy result</button>
     </div>
-
     <div class="foot">Tip: paste results in your #daily-sudoku channel. Format understood by the bot:
       <code>Daily Sudoku YYYY-MM-DD (Level) + Solved in mm:ss | Mistakes: n</code>.
     </div>
@@ -73,9 +66,9 @@
 
 <script>
 /* ---------- helpers ---------- */
-const pad = n => (n<10?'0':'')+n;
+const pad=n=>(n<10?'0':'')+n;
 function getParam(name){const u=new URL(location.href);return u.searchParams.get(name);}
-function ymdFromLocal(date){const y=date.getFullYear(), m=pad(date.getMonth()+1), d=pad(date.getDate()); return `${y}-${m}-${d}`;}
+function ymdFromLocal(date){const y=date.getFullYear(),m=pad(date.getMonth()+1),d=pad(date.getDate());return `${y}-${m}-${d}`;}
 
 /* ---------- seeded rng ---------- */
 function xmur3(str){for(var i=0,h=1779033703^str.length;i<str.length;i++)h=Math.imul(h^str.charCodeAt(i),3432918353),h=h<<13|h>>>19;return function(){h=Math.imul(h^h>>>16,2246822507);h=Math.imul(h^h>>>13,3266489909);return (h^=h>>>16)>>>0}}
@@ -85,51 +78,89 @@ function shuffle(a,r){const x=a.slice();for(let i=x.length-1;i>0;i--){const j=Ma
 
 /* ---------- sudoku core ---------- */
 function valid(grid,r,c,v){for(let i=0;i<9;i++){if(grid[r][i]===v||grid[i][c]===v)return false;}const br=Math.floor(r/3)*3,bc=Math.floor(c/3)*3;for(let rr=br;rr<br+3;rr++)for(let cc=bc;cc<bc+3;cc++)if(grid[rr][cc]===v)return false;return true;}
-function solveOne(grid){const g=grid.map(r=>r.slice());function next(){for(let r=0;r<9;r++)for(let c=0;c<9;c++)if(g[r][c]===0)return [r,c];return null;}function bt(){const pos=next();if(!pos)return true;const[r,c]=pos;for(let v=1;v<=9;v++){if(valid(g,r,c,v)){g[r][c]=v;if(bt())return true;g[r][c]=0;}}return false;}bt();return g;}
 function generateSolved(r){const g=[...Array(9)].map(()=>Array(9).fill(0));const digits=[1,2,3,4,5,6,7,8,9];function fill(i=0){if(i>=81)return true;const r0=Math.floor(i/9),c0=i%9;for(const v of shuffle(digits,r)){if(valid(g,r0,c0,v)){g[r0][c0]=v;if(fill(i+1))return true;g[r0][c0]=0;}}return false;}fill(0);return g;}
 function holesFor(level){switch((level||'Medium').toLowerCase()){case 'easy':return 40;case 'medium':return 50;case 'hard':return 58;case 'expert':return 62;default:return 50;}}
 function makePuzzle(solved,r,holes){const puz=solved.map(r=>r.slice());const all=[...Array(81)].map((_,i)=>[Math.floor(i/9),i%9]);for(const [r0,c0] of shuffle(all,r)){if(holes<=0)break;const keep=puz[r0][c0];puz[r0][c0]=0;let count=0;(function countSolutions(grid){const g=grid.map(r=>r.slice());function next(){for(let r=0;r<9;r++)for(let c=0;c<9;c++)if(g[r][c]===0)return [r,c];return null;}function bt(){const pos=next();if(!pos){count++;return count>=2;}const[rr,cc]=pos;for(let v=1;v<=9;v++){if(valid(g,rr,cc,v)){g[rr][cc]=v;if(bt())return true;g[rr][cc]=0;}}return false;}bt();})(puz);if(count!==1){puz[r0][c0]=keep;}else{holes--;}}return puz;}
 
 /* ---------- ui ---------- */
-const gridEl=document.getElementById('grid');
-const timerEl=document.getElementById('timer');
-const mistakesEl=document.getElementById('mistakes');
-const statusEl=document.getElementById('status');
-const levelEl=document.getElementById('level');
-const loadBtn=document.getElementById('loadBtn');
-const shareBox=document.getElementById('shareBox');
-const shareText=document.getElementById('shareText');
-const copyBtn=document.getElementById('copyBtn');
-const dateLabel=document.getElementById('dateLabel');
-const levelLabel=document.getElementById('levelLabel');
-const pauseBtn=document.getElementById('pauseBtn');
-const checkBtn=document.getElementById('checkBtn');
+const gridEl=document.getElementById('grid'),timerEl=document.getElementById('timer'),mistakesEl=document.getElementById('mistakes'),statusEl=document.getElementById('status'),levelEl=document.getElementById('level'),loadBtn=document.getElementById('loadBtn'),shareBox=document.getElementById('shareBox'),shareText=document.getElementById('shareText'),copyBtn=document.getElementById('copyBtn'),dateLabel=document.getElementById('dateLabel'),levelLabel=document.getElementById('levelLabel'),pauseBtn=document.getElementById('pauseBtn'),checkBtn=document.getElementById('checkBtn');
+let start=null,tick=null,mistakes=0,solution=null,currentDate='',currentLevel='Medium',paused=false,elapsedBase=0;
 
-let start=null, tick=null, mistakes=0, solution=null, currentDate='', currentLevel='Medium';
-let paused=false, elapsedBase=0;
+/* ---------- storage helpers ---------- */
+function saveState(){
+  const inputs=gridEl.querySelectorAll('input');
+  const vals=[...inputs].map(el=>el.readOnly?'#':(el.value||''));
+  const data={vals:vals, mistakes, elapsedBase, paused, currentDate, currentLevel};
+  localStorage.setItem('sudoku-'+currentDate+'-'+currentLevel,JSON.stringify(data));
+}
+function loadState(){
+  const key='sudoku-'+currentDate+'-'+currentLevel;
+  const raw=localStorage.getItem(key);
+  if(!raw) return null;
+  try{return JSON.parse(raw);}catch{ return null; }
+}
+function clearState(){
+  localStorage.removeItem('sudoku-'+currentDate+'-'+currentLevel);
+}
 
 /* ---------- game flow ---------- */
 function setDateAndLevel(){const dParam=getParam('d');const lev=getParam('level');const d=dParam?new Date(dParam+'T00:00:00'):new Date();currentDate=isNaN(d.getTime())?ymdFromLocal(new Date()):ymdFromLocal(d);currentLevel=lev?String(lev).charAt(0).toUpperCase()+String(lev).slice(1).toLowerCase():levelEl.value;dateLabel.textContent=currentDate;levelEl.value=currentLevel;levelLabel.textContent=currentLevel;}
 function seed(){return `${currentDate}-${currentLevel}`;}
 
-function render(puz,sol){gridEl.innerHTML='';let idx=0;for(let r=0;r<9;r++){for(let c=0;c<9;c++){const cell=document.createElement('div');cell.className='cell'+((c===2||c===5)?' br':'')+((r===2||r===5)?' bb':'');const inp=document.createElement('input');const v=puz[r][c];if(v!==0){inp.value=v;inp.readOnly=true;cell.classList.add('fixed');}inp.maxLength=1;inp.inputMode='numeric';inp.addEventListener('input',e=>{const t=e.target;t.value=t.value.replace(/[^1-9]/g,'').slice(0,1);if(!start&&t.value)startTimer();if(t.value){const num=+t.value;if(num!==sol[r][c]){mistakes++;mistakesEl.textContent=mistakes;cell.classList.add('badflash');setTimeout(()=>cell.classList.remove('badflash'),200);}}checkDone();});cell.appendChild(inp);gridEl.appendChild(cell);idx++;}}}
-function startTimer(){if(paused)return;if(start)return;start=new Date();tick=setInterval(()=>{const elapsed=Math.floor(elapsedBase+(Date.now()-start.getTime())/1000);timerEl.textContent=`${pad(Math.floor(elapsed/60))}:${pad(elapsed%60)}`;},250);}
+function render(puz,sol,restore=null){
+  gridEl.innerHTML='';
+  let idx=0;
+  for(let r=0;r<9;r++){
+    for(let c=0;c<9;c++){
+      const cell=document.createElement('div');
+      cell.className='cell'+((c===2||c===5)?' br':'')+((r===2||r===5)?' bb':'');
+      const inp=document.createElement('input');
+      const v=puz[r][c];
+      if(v!==0){ inp.value=v; inp.readOnly=true; cell.classList.add('fixed'); }
+      inp.maxLength=1; inp.inputMode='numeric';
+      if(restore && restore.vals[idx] && restore.vals[idx]!=='#' && !inp.readOnly){ inp.value=restore.vals[idx]; }
+      inp.addEventListener('input',e=>{
+        const t=e.target; t.value=t.value.replace(/[^1-9]/g,'').slice(0,1);
+        if(!start && t.value) startTimer();
+        if(t.value){const num=+t.value;if(num!==sol[r][c]){mistakes++;mistakesEl.textContent=mistakes;cell.classList.add('badflash');setTimeout(()=>cell.classList.remove('badflash'),200);}}
+        checkDone(); saveState();
+      });
+      cell.appendChild(inp);
+      gridEl.appendChild(cell);
+      idx++;
+    }
+  }
+}
+
+function startTimer(){ if(paused)return; if(start)return; start=new Date(); tick=setInterval(()=>{const elapsed=Math.floor(elapsedBase+(Date.now()-start.getTime())/1000);timerEl.textContent=`${pad(Math.floor(elapsed/60))}:${pad(elapsed%60)}`;},250);}
 function reset(){if(tick)clearInterval(tick);tick=null;start=null;paused=false;elapsedBase=0;timerEl.textContent='00:00';mistakes=0;mistakesEl.textContent='0';shareBox.style.display='none';pauseBtn.textContent='Pause';clearMarks?.();}
 function checkDone(){const inputs=gridEl.querySelectorAll('input');for(const el of inputs){if(!el.readOnly&&!el.value)return;}let ok=true;let i=0;for(let r=0;r<9;r++)for(let c=0;c<9;c++){const el=inputs[i++];const val=el.readOnly?+el.value:+(el.value||0);if(val!==solution[r][c])ok=false;}if(ok)onSolved();}
-function onSolved(){if(tick)clearInterval(tick);const elapsed=Math.floor(elapsedBase+(start?(Date.now()-start.getTime())/1000:0));const mm=pad(Math.floor(elapsed/60)),ss=pad(elapsed%60);statusEl.innerHTML=`<span style="color:var(--good)">✅ Solved!</span> Time: ${mm}:${ss} • Mistakes: ${mistakes}`;const block=`Daily Sudoku ${currentDate} (${currentLevel})\n✅ Solved in ${mm}:${ss} | Mistakes: ${mistakes}`;shareText.textContent=block;shareBox.style.display='block';}
+function onSolved(){if(tick)clearInterval(tick);clearState();const elapsed=Math.floor(elapsedBase+(start?(Date.now()-start.getTime())/1000:0));const mm=pad(Math.floor(elapsed/60)),ss=pad(elapsed%60);statusEl.innerHTML=`<span style="color:var(--good)">✅ Solved!</span> Time: ${mm}:${ss} • Mistakes: ${mistakes}`;const block=`Daily Sudoku ${currentDate} (${currentLevel})\n✅ Solved in ${mm}:${ss} | Mistakes: ${mistakes}`;shareText.textContent=block;shareBox.style.display='block';}
 copyBtn.onclick=()=>{navigator.clipboard.writeText(shareText.textContent).then(()=>{copyBtn.textContent='Copied!';setTimeout(()=>copyBtn.textContent='Copy result',1200);});};
 
-function load(){reset();setDateAndLevel();const rnd=rngFromSeed(seed());const solved=generateSolved(rnd);const puz=makePuzzle(solved,rnd,holesFor(currentLevel));solution=solved;render(puz,solved);statusEl.textContent='Puzzle loaded. Good luck!';}
+function load(tryRestore=true){
+  reset(); setDateAndLevel();
+  const rnd=rngFromSeed(seed());
+  const solved=generateSolved(rnd);
+  const puz=makePuzzle(solved,rnd,holesFor(currentLevel));
+  solution=solved;
+  const restore=tryRestore?loadState():null;
+  render(puz,solved,restore);
+  if(restore){ mistakes=restore.mistakes||0; mistakesEl.textContent=mistakes; elapsedBase=restore.elapsedBase||0; paused=restore.paused||false; if(!paused && restore.vals.some(v=>v&&v!=='#')){ startTimer(); } statusEl.textContent='Restored saved game.'; }
+  else { statusEl.textContent='Puzzle loaded. Good luck!'; }
+}
 
 /* ---------- new features ---------- */
-pauseBtn.addEventListener('click',()=>{if(!paused){paused=true;if(start){elapsedBase+=(Date.now()-start.getTime())/1000;start=null;}if(tick){clearInterval(tick);tick=null;}pauseBtn.textContent='Resume';statusEl.innerHTML=`⏸ Paused <span class="paused-note">(timer stopped)</span>`;}else{paused=false;statusEl.textContent='Resumed. Good luck!';startTimer();pauseBtn.textContent='Pause';}});
+pauseBtn.addEventListener('click',()=>{if(!paused){paused=true;if(start){elapsedBase+=(Date.now()-start.getTime())/1000;start=null;}if(tick){clearInterval(tick);tick=null;}pauseBtn.textContent='Resume';statusEl.innerHTML=`⏸ Paused <span class="paused-note">(timer stopped)</span>`;}else{paused=false;statusEl.textContent='Resumed. Good luck!';startTimer();pauseBtn.textContent='Pause';}saveState();});
 function clearMarks(){gridEl.querySelectorAll('.cell.wrong,.cell.right').forEach(el=>el.classList.remove('wrong','right'));}
 function checkProgress(){if(!solution)return;clearMarks();const inputs=gridEl.querySelectorAll('input');let i=0,wrong=0;for(let r=0;r<9;r++){for(let c=0;c<9;c++){const cell=inputs[i++].parentElement;const el=cell.querySelector('input');if(el.readOnly)continue;if(!el.value)continue;const val=+el.value;if(val!==solution[r][c]){cell.classList.add('wrong');wrong++;}}}statusEl.textContent=wrong?`Found ${wrong} incorrect entr${wrong===1?'y':'ies'}.`:'So far so good! ✅';}
 checkBtn.addEventListener('click',checkProgress);
 
-loadBtn.onclick=load;
-levelEl.onchange=()=>{currentLevel=levelEl.value;levelLabel.textContent=currentLevel;load();};
-setDateAndLevel();load();
+loadBtn.onclick=()=>{clearState();load(false);};
+levelEl.onchange=()=>{currentLevel=levelEl.value;levelLabel.textContent=currentLevel;clearState();load(false);};
+
+setDateAndLevel();
+load();
 </script>
 </body>
 </html>
