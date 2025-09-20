@@ -8,6 +8,8 @@
   :root{
     --bg:#0f172a;--card:#111827;--text:#e5e7eb;--muted:#94a3b8;
     --line:#1f2937;--thick:#374151;--accent:#60a5fa;--good:#22c55e;--bad:#ef4444;
+    --cell: clamp(30px, 9.5vw, 48px);
+    --fs: calc(var(--cell) * 0.48);
   }
   body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
   .wrap{max-width:900px;margin:40px auto;padding:0 16px}
@@ -18,17 +20,19 @@
   select,button{background:#0b1220;border:1px solid #223;border-radius:10px;color:var(--text);padding:8px 10px}
   button{cursor:pointer}
   .hud{margin-left:auto;display:flex;gap:16px;color:var(--muted)}
-  #grid{display:grid;grid-template-columns:repeat(9,42px);grid-template-rows:repeat(9,42px);gap:0;border:2px solid var(--thick);width:max-content}
+  #grid{display:grid;grid-template-columns:repeat(9,var(--cell));grid-template-rows:repeat(9,var(--cell));gap:0;border:2px solid var(--thick);width:max-content;max-width:95vw}
   .cell{position:relative;border:1px solid var(--line)}
-  .cell input{width:100%;height:100%;border:0;background:transparent;color:var(--text);text-align:center;font-size:20px;outline:none}
+  .cell input{width:100%;height:100%;border:0;background:transparent;color:var(--text);text-align:center;font-size:var(--fs);line-height:1;outline:none}
   .cell.fixed{background:#0b1220;font-weight:700}
-  /* thick subgrid lines */
   .cell.br{border-right:2px solid var(--thick)}
   .cell.bb{border-bottom:2px solid var(--thick)}
   .badflash{animation:bad .25s}
   @keyframes bad{0%{background:#2b0b0b}100%{background:transparent}}
   .share{display:none;margin-top:12px;border:1px dashed #223;border-radius:12px;padding:10px;background:#0b1220}
   .foot{margin-top:10px;color:var(--muted);font-size:14px}
+  .paused-note{ color: var(--muted); margin-left:6px; font-style:italic; }
+  .cell.wrong input { color: var(--bad); font-weight:700; }
+  .cell.right input { color: var(--good); }
 </style>
 </head>
 <body>
@@ -44,6 +48,8 @@
         </select>
       </label>
       <button id="loadBtn">Load Puzzle</button>
+      <button id="pauseBtn">Pause</button>
+      <button id="checkBtn">Check progress</button>
       <div class="hud">
         <div>⏱ <span id="timer">00:00</span></div>
         <div>❌ Mistakes: <span id="mistakes">0</span></div>
@@ -69,92 +75,22 @@
 /* ---------- helpers ---------- */
 const pad = n => (n<10?'0':'')+n;
 function getParam(name){const u=new URL(location.href);return u.searchParams.get(name);}
-function ymdFromLocal(date){
-  // robust YYYY-MM-DD in local time
-  const y=date.getFullYear(), m=pad(date.getMonth()+1), d=pad(date.getDate());
-  return `${y}-${m}-${d}`;
-}
+function ymdFromLocal(date){const y=date.getFullYear(), m=pad(date.getMonth()+1), d=pad(date.getDate()); return `${y}-${m}-${d}`;}
 
-/* ---------- seeded RNG (date + difficulty) ---------- */
+/* ---------- seeded rng ---------- */
 function xmur3(str){for(var i=0,h=1779033703^str.length;i<str.length;i++)h=Math.imul(h^str.charCodeAt(i),3432918353),h=h<<13|h>>>19;return function(){h=Math.imul(h^h>>>16,2246822507);h=Math.imul(h^h>>>13,3266489909);return (h^=h>>>16)>>>0}}
 function sfc32(a,b,c,d){return function(){a>>>=0;b>>>=0;c>>>=0;d>>>=0;var t=a+b|0;a=b^b>>>9;b=c+(c<<3)|0;c=c<<21|c>>>11;d=d+1|0;t=t+d|0;c=c+t|0;return (t>>>0)/4294967296}}
 function rngFromSeed(seed){const s=xmur3(seed);return sfc32(s(),s(),s(),s());}
-function choice(arr,r){return arr[Math.floor(r()*arr.length)];}
 function shuffle(a,r){const x=a.slice();for(let i=x.length-1;i>0;i--){const j=Math.floor(r()*(i+1));[x[i],x[j]]=[x[j],x[i]];}return x;}
 
-/* ---------- sudoku core (generator + solver) ---------- */
-function valid(grid,r,c,v){
-  for(let i=0;i<9;i++){ if(grid[r][i]===v || grid[i][c]===v) return false; }
-  const br=Math.floor(r/3)*3, bc=Math.floor(c/3)*3;
-  for(let rr=br; rr<br+3; rr++) for(let cc=bc; cc<bc+3; cc++) if(grid[rr][cc]===v) return false;
-  return true;
-}
-function solveOne(grid){ // backtracking (returns solved copy)
-  const g=grid.map(row=>row.slice());
-  function next(){
-    for(let r=0;r<9;r++) for(let c=0;c<9;c++) if(g[r][c]===0) return [r,c];
-    return null;
-  }
-  function bt(){
-    const pos=next(); if(!pos) return true;
-    const [r,c]=pos;
-    for(let v=1;v<=9;v++){
-      if(valid(g,r,c,v)){ g[r][c]=v; if(bt()) return true; g[r][c]=0; }
-    }
-    return false;
-  }
-  bt();
-  return g;
-}
-function generateSolved(r){
-  const g=[...Array(9)].map(()=>Array(9).fill(0));
-  const digits=[1,2,3,4,5,6,7,8,9];
-  function fill(i=0){
-    if(i>=81) return true;
-    const r0=Math.floor(i/9), c0=i%9;
-    for(const v of shuffle(digits,r)){
-      if(valid(g,r0,c0,v)){ g[r0][c0]=v; if(fill(i+1)) return true; g[r0][c0]=0; }
-    }
-    return false;
-  }
-  fill(0); return g;
-}
-function holesFor(level){
-  switch((level||'Medium').toLowerCase()){
-    case 'easy': return 40;
-    case 'medium': return 50;
-    case 'hard': return 58;
-    case 'expert': return 62;
-    default: return 50;
-  }
-}
-function makePuzzle(solved,r,holes){
-  const puz=solved.map(row=>row.slice());
-  const all=[...Array(81)].map((_,i)=>[Math.floor(i/9),i%9]);
-  for(const [r0,c0] of shuffle(all,r)){
-    if(holes<=0) break;
-    const keep=puz[r0][c0];
-    puz[r0][c0]=0;
-    // quick uniqueness check: stop if >1 solution
-    let count=0;
-    (function countSolutions(grid){
-      const g=grid.map(row=>row.slice());
-      function next(){for(let r=0;r<9;r++)for(let c=0;c<9;c++)if(g[r][c]===0)return [r,c];return null;}
-      function bt(){
-        const pos=next(); if(!pos){count++;return count>=2;}
-        const [rr,cc]=pos;
-        for(let v=1;v<=9;v++){
-          if(valid(g,rr,cc,v)){ g[rr][cc]=v; if(bt()) return true; g[rr][cc]=0; }
-        } return false;
-      }
-      bt();
-    })(puz);
-    if(count!==1){ puz[r0][c0]=keep; } else { holes--; }
-  }
-  return puz;
-}
+/* ---------- sudoku core ---------- */
+function valid(grid,r,c,v){for(let i=0;i<9;i++){if(grid[r][i]===v||grid[i][c]===v)return false;}const br=Math.floor(r/3)*3,bc=Math.floor(c/3)*3;for(let rr=br;rr<br+3;rr++)for(let cc=bc;cc<bc+3;cc++)if(grid[rr][cc]===v)return false;return true;}
+function solveOne(grid){const g=grid.map(r=>r.slice());function next(){for(let r=0;r<9;r++)for(let c=0;c<9;c++)if(g[r][c]===0)return [r,c];return null;}function bt(){const pos=next();if(!pos)return true;const[r,c]=pos;for(let v=1;v<=9;v++){if(valid(g,r,c,v)){g[r][c]=v;if(bt())return true;g[r][c]=0;}}return false;}bt();return g;}
+function generateSolved(r){const g=[...Array(9)].map(()=>Array(9).fill(0));const digits=[1,2,3,4,5,6,7,8,9];function fill(i=0){if(i>=81)return true;const r0=Math.floor(i/9),c0=i%9;for(const v of shuffle(digits,r)){if(valid(g,r0,c0,v)){g[r0][c0]=v;if(fill(i+1))return true;g[r0][c0]=0;}}return false;}fill(0);return g;}
+function holesFor(level){switch((level||'Medium').toLowerCase()){case 'easy':return 40;case 'medium':return 50;case 'hard':return 58;case 'expert':return 62;default:return 50;}}
+function makePuzzle(solved,r,holes){const puz=solved.map(r=>r.slice());const all=[...Array(81)].map((_,i)=>[Math.floor(i/9),i%9]);for(const [r0,c0] of shuffle(all,r)){if(holes<=0)break;const keep=puz[r0][c0];puz[r0][c0]=0;let count=0;(function countSolutions(grid){const g=grid.map(r=>r.slice());function next(){for(let r=0;r<9;r++)for(let c=0;c<9;c++)if(g[r][c]===0)return [r,c];return null;}function bt(){const pos=next();if(!pos){count++;return count>=2;}const[rr,cc]=pos;for(let v=1;v<=9;v++){if(valid(g,rr,cc,v)){g[rr][cc]=v;if(bt())return true;g[rr][cc]=0;}}return false;}bt();})(puz);if(count!==1){puz[r0][c0]=keep;}else{holes--;}}return puz;}
 
-/* ---------- UI + daily logic ---------- */
+/* ---------- ui ---------- */
 const gridEl=document.getElementById('grid');
 const timerEl=document.getElementById('timer');
 const mistakesEl=document.getElementById('mistakes');
@@ -166,96 +102,34 @@ const shareText=document.getElementById('shareText');
 const copyBtn=document.getElementById('copyBtn');
 const dateLabel=document.getElementById('dateLabel');
 const levelLabel=document.getElementById('levelLabel');
+const pauseBtn=document.getElementById('pauseBtn');
+const checkBtn=document.getElementById('checkBtn');
 
 let start=null, tick=null, mistakes=0, solution=null, currentDate='', currentLevel='Medium';
+let paused=false, elapsedBase=0;
 
-function setDateAndLevel(){
-  const dParam=getParam('d');
-  const lev=getParam('level');
-  const d = dParam ? new Date(dParam+'T00:00:00') : new Date();
-  currentDate = isNaN(d.getTime()) ? ymdFromLocal(new Date()) : ymdFromLocal(d);
-  currentLevel = lev ? String(lev).charAt(0).toUpperCase()+String(lev).slice(1).toLowerCase() : levelEl.value;
-  dateLabel.textContent=currentDate;
-  levelEl.value=currentLevel;
-  levelLabel.textContent=currentLevel;
-}
-function seed(){ return `${currentDate}-${currentLevel}`; }
+/* ---------- game flow ---------- */
+function setDateAndLevel(){const dParam=getParam('d');const lev=getParam('level');const d=dParam?new Date(dParam+'T00:00:00'):new Date();currentDate=isNaN(d.getTime())?ymdFromLocal(new Date()):ymdFromLocal(d);currentLevel=lev?String(lev).charAt(0).toUpperCase()+String(lev).slice(1).toLowerCase():levelEl.value;dateLabel.textContent=currentDate;levelEl.value=currentLevel;levelLabel.textContent=currentLevel;}
+function seed(){return `${currentDate}-${currentLevel}`;}
 
-function render(puz,sol){
-  gridEl.innerHTML='';
-  let idx=0;
-  for(let r=0;r<9;r++){
-    for(let c=0;c<9;c++){
-      const cell=document.createElement('div');
-      cell.className='cell'+((c===2||c===5)?' br':'')+((r===2||r===5)?' bb':'');
-      const inp=document.createElement('input');
-      const v=puz[r][c];
-      if(v!==0){ inp.value=v; inp.readOnly=true; cell.classList.add('fixed'); }
-      inp.maxLength=1; inp.inputMode='numeric';
-      inp.addEventListener('input',e=>{
-        const t=e.target; t.value=t.value.replace(/[^1-9]/g,'').slice(0,1);
-        if(!start && t.value) startTimer();
-        if(t.value){
-          const num=+t.value;
-          if(num!==sol[r][c]){ mistakes++; mistakesEl.textContent=mistakes; cell.classList.add('badflash'); setTimeout(()=>cell.classList.remove('badflash'),200); }
-        }
-        checkDone();
-      });
-      cell.appendChild(inp);
-      gridEl.appendChild(cell);
-      idx++;
-    }
-  }
-}
-function startTimer(){
-  start=new Date();
-  tick=setInterval(()=>{
-    const s=Math.floor((Date.now()-start.getTime())/1000);
-    timerEl.textContent=`${pad(Math.floor(s/60))}:${pad(s%60)}`;
-  },250);
-}
-function reset(){
-  if(tick) clearInterval(tick);
-  start=null; timerEl.textContent='00:00'; mistakes=0; mistakesEl.textContent='0';
-  shareBox.style.display='none';
-}
-function checkDone(){
-  const inputs=gridEl.querySelectorAll('input');
-  for(const el of inputs){ if(!el.readOnly && !el.value) return; }
-  // verify
-  let ok=true; let i=0;
-  for(let r=0;r<9;r++) for(let c=0;c<9;c++){
-    const el=inputs[i++]; const val=el.readOnly?+el.value:+(el.value||0);
-    if(val!==solution[r][c]) ok=false;
-  }
-  if(ok) onSolved();
-}
-function onSolved(){
-  if(tick) clearInterval(tick);
-  const elapsed=Math.floor((Date.now()-start.getTime())/1000);
-  const mm=pad(Math.floor(elapsed/60)), ss=pad(elapsed%60);
-  statusEl.innerHTML=`<span style="color:var(--good)">✅ Solved!</span> Time: ${mm}:${ss} • Mistakes: ${mistakes}`;
-  const block=`Daily Sudoku ${currentDate} (${currentLevel})
-✅ Solved in ${mm}:${ss} | Mistakes: ${mistakes}`;
-  shareText.textContent=block;
-  shareBox.style.display='block';
-}
-copyBtn.onclick=()=>{ navigator.clipboard.writeText(shareText.textContent).then(()=>{ copyBtn.textContent='Copied!'; setTimeout(()=>copyBtn.textContent='Copy result',1200); }); };
+function render(puz,sol){gridEl.innerHTML='';let idx=0;for(let r=0;r<9;r++){for(let c=0;c<9;c++){const cell=document.createElement('div');cell.className='cell'+((c===2||c===5)?' br':'')+((r===2||r===5)?' bb':'');const inp=document.createElement('input');const v=puz[r][c];if(v!==0){inp.value=v;inp.readOnly=true;cell.classList.add('fixed');}inp.maxLength=1;inp.inputMode='numeric';inp.addEventListener('input',e=>{const t=e.target;t.value=t.value.replace(/[^1-9]/g,'').slice(0,1);if(!start&&t.value)startTimer();if(t.value){const num=+t.value;if(num!==sol[r][c]){mistakes++;mistakesEl.textContent=mistakes;cell.classList.add('badflash');setTimeout(()=>cell.classList.remove('badflash'),200);}}checkDone();});cell.appendChild(inp);gridEl.appendChild(cell);idx++;}}}
+function startTimer(){if(paused)return;if(start)return;start=new Date();tick=setInterval(()=>{const elapsed=Math.floor(elapsedBase+(Date.now()-start.getTime())/1000);timerEl.textContent=`${pad(Math.floor(elapsed/60))}:${pad(elapsed%60)}`;},250);}
+function reset(){if(tick)clearInterval(tick);tick=null;start=null;paused=false;elapsedBase=0;timerEl.textContent='00:00';mistakes=0;mistakesEl.textContent='0';shareBox.style.display='none';pauseBtn.textContent='Pause';clearMarks?.();}
+function checkDone(){const inputs=gridEl.querySelectorAll('input');for(const el of inputs){if(!el.readOnly&&!el.value)return;}let ok=true;let i=0;for(let r=0;r<9;r++)for(let c=0;c<9;c++){const el=inputs[i++];const val=el.readOnly?+el.value:+(el.value||0);if(val!==solution[r][c])ok=false;}if(ok)onSolved();}
+function onSolved(){if(tick)clearInterval(tick);const elapsed=Math.floor(elapsedBase+(start?(Date.now()-start.getTime())/1000:0));const mm=pad(Math.floor(elapsed/60)),ss=pad(elapsed%60);statusEl.innerHTML=`<span style="color:var(--good)">✅ Solved!</span> Time: ${mm}:${ss} • Mistakes: ${mistakes}`;const block=`Daily Sudoku ${currentDate} (${currentLevel})\n✅ Solved in ${mm}:${ss} | Mistakes: ${mistakes}`;shareText.textContent=block;shareBox.style.display='block';}
+copyBtn.onclick=()=>{navigator.clipboard.writeText(shareText.textContent).then(()=>{copyBtn.textContent='Copied!';setTimeout(()=>copyBtn.textContent='Copy result',1200);});};
 
-function load(){
-  reset(); setDateAndLevel();
-  const rnd=rngFromSeed(seed());
-  const solved=generateSolved(rnd);
-  const puz=makePuzzle(solved,rnd,holesFor(currentLevel));
-  solution=solved;
-  render(puz,solved);
-  statusEl.textContent='Puzzle loaded. Good luck!';
-}
+function load(){reset();setDateAndLevel();const rnd=rngFromSeed(seed());const solved=generateSolved(rnd);const puz=makePuzzle(solved,rnd,holesFor(currentLevel));solution=solved;render(puz,solved);statusEl.textContent='Puzzle loaded. Good luck!';}
 
-document.getElementById('loadBtn').onclick=load;
-levelEl.onchange=()=>{ currentLevel=levelEl.value; levelLabel.textContent=currentLevel; load(); };
+/* ---------- new features ---------- */
+pauseBtn.addEventListener('click',()=>{if(!paused){paused=true;if(start){elapsedBase+=(Date.now()-start.getTime())/1000;start=null;}if(tick){clearInterval(tick);tick=null;}pauseBtn.textContent='Resume';statusEl.innerHTML=`⏸ Paused <span class="paused-note">(timer stopped)</span>`;}else{paused=false;statusEl.textContent='Resumed. Good luck!';startTimer();pauseBtn.textContent='Pause';}});
+function clearMarks(){gridEl.querySelectorAll('.cell.wrong,.cell.right').forEach(el=>el.classList.remove('wrong','right'));}
+function checkProgress(){if(!solution)return;clearMarks();const inputs=gridEl.querySelectorAll('input');let i=0,wrong=0;for(let r=0;r<9;r++){for(let c=0;c<9;c++){const cell=inputs[i++].parentElement;const el=cell.querySelector('input');if(el.readOnly)continue;if(!el.value)continue;const val=+el.value;if(val!==solution[r][c]){cell.classList.add('wrong');wrong++;}}}statusEl.textContent=wrong?`Found ${wrong} incorrect entr${wrong===1?'y':'ies'}.`:'So far so good! ✅';}
+checkBtn.addEventListener('click',checkProgress);
 
-setDateAndLevel(); load();
+loadBtn.onclick=load;
+levelEl.onchange=()=>{currentLevel=levelEl.value;levelLabel.textContent=currentLevel;load();};
+setDateAndLevel();load();
 </script>
 </body>
 </html>
